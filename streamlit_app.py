@@ -3,40 +3,31 @@ from google import genai
 from google.genai import types
 import time
 
-# タイトルと説明文を表示
-st.title("💬 Gemini Chatbot")
+st.title("💬 Gemini Chatbot (安定性強化版)")
 st.write(
-    "このアプリは Google の Gemini モデルを使用したシンプルなチャットボットです。"
-    "利用するには Google AI Studio で取得した Gemini API キーを入力してください。"
+    "このアプリは Google の Gemini モデルを使用したチャットボットです。"
+    "混雑時の 503 エラーに対する自動リトライ機能を備えています。"
 )
 
-# ユーザーにGemini APIキー入力を求める
 gemini_api_key = st.text_input("Gemini API Key", type="password")
 
 if not gemini_api_key:
     st.info("続けるには Gemini API キーを入力してください。", icon="🗝️")
 else:
-    # Geminiクライアントの初期化
     client = genai.Client(api_key=gemini_api_key)
 
-    # チャット履歴を保持するセッションステートの初期化
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # 既存のチャットメッセージを表示
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # ユーザーからの入力を受け取る
     if prompt := st.chat_input("何か質問してください..."):
-
-        # ユーザーの入力を保存・表示
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Gemini APIへ送るための過去のチャット履歴を変換
         history_contents = []
         for m in st.session_state.messages:
             role = "user" if m["role"] == "user" else "model"
@@ -47,25 +38,26 @@ else:
                 )
             )
 
-        # アシスタントの返答をストリーミング形式で生成・表示（リトライ処理付き）
         with st.chat_message("assistant"):
             response_stream = None
             max_retries = 3
             wait_seconds = 2
 
+            # 503エラー対策としての自動リトライロジック
             for attempt in range(max_retries):
                 try:
                     response_stream = client.models.generate_content_stream(
                         model="gemini-3.8-flash",
                         contents=history_contents,
                     )
-                    break # 成功したらループを抜ける
+                    break
                 except Exception as e:
-                    if "503" in str(e) and attempt < max_retries - 1:
+                    # 503エラーや一時的な過負荷エラーの場合のみリトライ
+                    if ("503" in str(e) or "UNAVAILABLE" in str(e)) and attempt < max_retries - 1:
                         time.sleep(wait_seconds)
-                        wait_seconds *= 2 # 待機時間を増やす（指数バックオフ）
+                        wait_seconds *= 2  # 待機時間を倍々に増やす
                     else:
-                        st.error(f"エラーが発生しました: {e}")
+                        st.error(f"APIサーバーが混雑しています。しばらく時間を置いてから再度お試しください。\n(エラー詳細: {e})")
                         break
 
             if response_stream:
@@ -76,7 +68,6 @@ else:
                                 yield chunk.text
 
                     response = st.write_stream(stream_generator())
-                    # アシスタントの応答をセッションに保存
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e:
                     st.error(f"ストリーミング処理中にエラーが発生しました: {e}")
