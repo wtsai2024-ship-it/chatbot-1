@@ -3,26 +3,38 @@ from google import genai
 from google.genai import types
 import time
 
-st.title("💬 Gemini Chatbot (安定性強化版)")
+st.title("💬 Gemini Chatbot (自動認証版)")
 st.write(
     "このアプリは Google の Gemini モデルを使用したチャットボットです。"
-    "混雑時の 503 エラーに対する自動リトライ機能を備えています。"
+    "APIキーは設定ファイル（Secrets）から自動で読み込まれます。"
 )
 
-gemini_api_key = st.text_input("Gemini API Key", type="password")
+# st.secrets からAPIキーを自動取得
+try:
+    gemini_api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    gemini_api_key = None
 
 if not gemini_api_key:
-    st.info("続けるには Gemini API キーを入力してください。", icon="🗝️")
+    st.error(
+        "APIキーが設定されていません。.streamlit/secrets.toml または "
+        "Streamlit CloudのSecrets設定に `GEMINI_API_KEY` を登録してください。",
+        icon="🚨"
+    )
 else:
+    # Geminiクライアントの初期化
     client = genai.Client(api_key=gemini_api_key)
 
+    # チャット履歴を保持するセッションステートの初期化
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    # 既存のチャットメッセージを表示
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
+    # ユーザーからの入力を受け取る
     if prompt := st.chat_input("何か質問してください..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -43,7 +55,7 @@ else:
             max_retries = 3
             wait_seconds = 2
 
-            # 503エラー対策としての自動リトライロジック
+            # 503エラー対策のリトライロジック
             for attempt in range(max_retries):
                 try:
                     response_stream = client.models.generate_content_stream(
@@ -52,10 +64,9 @@ else:
                     )
                     break
                 except Exception as e:
-                    # 503エラーや一時的な過負荷エラーの場合のみリトライ
                     if ("503" in str(e) or "UNAVAILABLE" in str(e)) and attempt < max_retries - 1:
                         time.sleep(wait_seconds)
-                        wait_seconds *= 2  # 待機時間を倍々に増やす
+                        wait_seconds *= 2
                     else:
                         st.error(f"APIサーバーが混雑しています。しばらく時間を置いてから再度お試しください。\n(エラー詳細: {e})")
                         break
