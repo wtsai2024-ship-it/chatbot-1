@@ -36,10 +36,8 @@ else:
             st.markdown(prompt)
 
         # Gemini APIへ送るための過去のチャット履歴を変換
-        # GeminiのSDKでは contents に過去のやり取りを持たせるか、chatsを使う方法があります
         history_contents = []
         for m in st.session_state.messages:
-            # streamlitの role ("user" / "assistant") を Gemini用 ("user" / "model") に変換
             role = "user" if m["role"] == "user" else "model"
             history_contents.append(
                 types.Content(
@@ -51,13 +49,12 @@ else:
         # アシスタントの返答をストリーミング形式で生成・表示
         with st.chat_message("assistant"):
             try:
-                # ストリーミング生成の呼び出し (例: gemini-2.5-flash)
+                # モデル名を最新の gemini-3.8-flash に変更
                 response_stream = client.models.generate_content_stream(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.8-flash",
                     contents=history_contents,
                 )
 
-                # st.write_stream でストリーミング出力を行う関数
                 def stream_generator():
                     for chunk in response_stream:
                         if chunk.text:
