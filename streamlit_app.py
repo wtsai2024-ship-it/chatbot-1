@@ -1,56 +1,72 @@
 import streamlit as st
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
-# Show title and description.
-st.title("💬 Chatbot")
+# タイトルと説明文を表示
+st.title("💬 Gemini Chatbot")
 st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+    "このアプリは Google の Gemini モデルを使用したシンプルなチャットボットです。"
+    "利用するには Google AI Studio で取得した Gemini API キーを入力してください。"
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
+# ユーザーにGemini APIキー入力を求める
+gemini_api_key = st.text_input("Gemini API Key", type="password")
+
+if not gemini_api_key:
+    st.info("続けるには Gemini API キーを入力してください。", icon="🗝️")
 else:
+    # Geminiクライアントの初期化
+    client = genai.Client(api_key=gemini_api_key)
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
-
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
+    # チャット履歴を保持するセッションステートの初期化
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display the existing chat messages via `st.chat_message`.
+    # 既存のチャットメッセージを表示
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+    # ユーザーからの入力を受け取る
+    if prompt := st.chat_input("何か質問してください..."):
 
-        # Store and display the current prompt.
+        # ユーザーの入力を保存・表示
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+        # Gemini APIへ送るための過去のチャット履歴を変換
+        # GeminiのSDKでは contents に過去のやり取りを持たせるか、chatsを使う方法があります
+        history_contents = []
+        for m in st.session_state.messages:
+            # streamlitの role ("user" / "assistant") を Gemini用 ("user" / "model") に変換
+            role = "user" if m["role"] == "user" else "model"
+            history_contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=m["content"])]
+                )
+            )
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
+        # アシスタントの返答をストリーミング形式で生成・表示
         with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+            try:
+                # ストリーミング生成の呼び出し (例: gemini-2.5-flash)
+                response_stream = client.models.generate_content_stream(
+                    model="gemini-2.5-flash",
+                    contents=history_contents,
+                )
+
+                # st.write_stream でストリーミング出力を行う関数
+                def stream_generator():
+                    for chunk in response_stream:
+                        if chunk.text:
+                            yield chunk.text
+
+                response = st.write_stream(stream_generator())
+                
+                # アシスタントの応答をセッションに保存
+                st.session_state.messages.append({"role": "assistant", "content": response})
+
+            except Exception as e:
+                st.error(f"エラーが発生しました: {e}")
