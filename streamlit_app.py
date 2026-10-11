@@ -1,6 +1,7 @@
 import streamlit as st
 from google import genai
 from google.genai import types
+import time
 
 # タイトルと説明文を表示
 st.title("💬 Gemini Chatbot")
@@ -46,24 +47,36 @@ else:
                 )
             )
 
-        # アシスタントの返答をストリーミング形式で生成・表示
+        # アシスタントの返答をストリーミング形式で生成・表示（リトライ処理付き）
         with st.chat_message("assistant"):
-            try:
-                # モデル名を最新の gemini-3.8-flash に変更
-                response_stream = client.models.generate_content_stream(
-                    model="gemini-3.8-flash",
-                    contents=history_contents,
-                )
+            response_stream = None
+            max_retries = 3
+            wait_seconds = 2
 
-                def stream_generator():
-                    for chunk in response_stream:
-                        if chunk.text:
-                            yield chunk.text
+            for attempt in range(max_retries):
+                try:
+                    response_stream = client.models.generate_content_stream(
+                        model="gemini-3.8-flash",
+                        contents=history_contents,
+                    )
+                    break # 成功したらループを抜ける
+                except Exception as e:
+                    if "503" in str(e) and attempt < max_retries - 1:
+                        time.sleep(wait_seconds)
+                        wait_seconds *= 2 # 待機時間を増やす（指数バックオフ）
+                    else:
+                        st.error(f"エラーが発生しました: {e}")
+                        break
 
-                response = st.write_stream(stream_generator())
-                
-                # アシスタントの応答をセッションに保存
-                st.session_state.messages.append({"role": "assistant", "content": response})
+            if response_stream:
+                try:
+                    def stream_generator():
+                        for chunk in response_stream:
+                            if chunk.text:
+                                yield chunk.text
 
-            except Exception as e:
-                st.error(f"エラーが発生しました: {e}")
+                    response = st.write_stream(stream_generator())
+                    # アシスタントの応答をセッションに保存
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                except Exception as e:
+                    st.error(f"ストリーミング処理中にエラーが発生しました: {e}")
